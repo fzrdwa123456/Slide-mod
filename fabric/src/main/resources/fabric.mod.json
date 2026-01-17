@@ -1,15 +1,15 @@
 {
 	"schemaVersion": 1,
-	"id": "template",
+	"id": "template-mod",
 	"version": "${version}",
 	"name": "Template Mod",
-	"description": "A template mod for Minecraft 1.20.1 using Architectury",
+	"description": "Template Mod for Architectury",
 	"authors": [
-		"Your Name"
+		"Template Author"
 	],
 	"contact": {
-		"homepage": "https://github.com/yourname/template-mod",
-		"sources": "https://github.com/yourname/template-mod"
+		"homepage": "https://github.com/example/template-mod",
+		"sources": "https://github.com/example/template-mod"
 	},
 	"license": "MIT",
 	"environment": "*",
@@ -22,7 +22,7 @@
 		]
 	},
 	"mixins": [
-		"template.mixins.json"
+		"template-mod.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.15.0",

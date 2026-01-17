@@ -9,21 +9,21 @@ architectury {
 
 loom {
     forge {
-        mixinConfig "template.mixins.json"
+        mixinConfig "template-mod.mixins.json"
     }
     runs {
         client {
             client()
             name "Forge Client"
             runDir "run/client"
-            vmArgs "-Dneoforge.enabledGameTestNamespace=template"
+            vmArgs "-Dneoforge.enabledGameTestNamespace=template-mod"
             programArgs "--username", "Player1"
         }
         server {
             server()
             name "Forge Server"
             runDir "run/server"
-            vmArgs "-Dneoforge.enabledGameTestNamespace=template"
+            vmArgs "-Dneoforge.enabledGameTestNamespace=template-mod"
         }
     }
 }
@@ -51,7 +51,6 @@ shadowJar {
     exclude 'module-info.class'
 }
 
-// 移除原生库修改任务，改为纯Java方式处理SQLite依赖
 
 remapJar {
 	inputFile.set shadowJar.archiveFile
@@ -67,11 +66,11 @@ jar {
 	manifest {
 		attributes([
 			'Specification-Title'     : 'Template Mod',
-			'Specification-Vendor'    : 'Your Name',
+			'Specification-Vendor'    : 'Template Author',
 			'Specification-Version'   : '1',
 			'Implementation-Title'    : project.name,
 			'Implementation-Version'  : project.version,
-			'Implementation-Vendor'   : 'Your Name'
+			'Implementation-Vendor'   : 'Template Author'
 		])
 	}
 }
@@ -103,11 +102,11 @@ tasks.named('processResources', ProcessResources).configure {
         forge_version: project.forge_version,
         forge_version_range: '[47,48)',
         loader_version_range: '[47,)',
-        mod_id: 'template',
+        mod_id: 'template-mod',
         mod_name: 'Template Mod',
         mod_version: project.version,
-        mod_authors: 'Your Name',
-        mod_description: 'A template mod for Minecraft 1.20.1 using Architectury'
+        mod_authors: 'Template Author',
+        mod_description: 'Template Mod for Architectury'
     ]
 
     inputs.properties replaceProperties
@@ -151,7 +150,7 @@ sourceSets {
             // Avoid JPMS split-package: keep top-level network package only in common
         }
         resources {
-            exclude 'assets/template/lang/*.json'
+            exclude 'assets/template-mod/lang/*.json'
         }
     }
 }

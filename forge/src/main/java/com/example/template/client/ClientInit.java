@@ -11,6 +11,6 @@ public class ClientInit {
 
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
-        System.out.println("Initializing Template Mod client (Forge)...");
+        System.out.println("Template Mod client initializing (Forge)...");
     }
 }

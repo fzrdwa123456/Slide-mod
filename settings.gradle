@@ -53,7 +53,7 @@ dependencyResolutionManagement {
 		}
 	}
 }
-rootProject.name = 'template'
+rootProject.name = 'template-mod'
 // 包含子项目
 include 'common'
 include 'fabric'

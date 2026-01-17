@@ -4,20 +4,20 @@ loaderVersion = "[47,)"
 license = "MIT"
 
 [[mods]]
-modId = "template"
+modId = "template-mod"
 version = "${mod_version}"
 displayName = "Template Mod"
-authors = "Your Name"
-description = '''A template mod for Minecraft 1.20.1 using Architectury'''
+authors = "Template Author"
+description = '''Template Mod for Architectury'''
 
-[[dependencies.template]]
+[[dependencies.template-mod]]
 modId = "forge"
 mandatory = true
 versionRange = "[47,48)"
 ordering = "NONE"
 side = "BOTH"
 
-[[dependencies.template]]
+[[dependencies.template-mod]]
 modId = "minecraft"
 mandatory = true
 versionRange = "[1.20.1,1.21)"

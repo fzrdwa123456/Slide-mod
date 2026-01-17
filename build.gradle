@@ -12,8 +12,8 @@ allprojects {
 	apply plugin: 'java'
 	apply plugin: 'architectury-plugin'
 	
-	group = 'com.example.template'
-	version = '1.0.0-1.20.1'
+	group = maven_group
+	version = '1.0.0-template-1.20.1'
 	
 	repositories {
 		maven { url = 'https://maven.architectury.dev/' }

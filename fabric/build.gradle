@@ -98,7 +98,7 @@ sourceSets {
             // Avoid JPMS split-package with shaded common (network package) in dev runtime
         }
         resources {
-            exclude 'assets/template/lang/*.json'
+            exclude 'assets/template-mod/lang/*.json'
             exclude 'pack.mcmeta'
         }
     }
