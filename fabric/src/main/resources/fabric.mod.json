@@ -1,28 +1,28 @@
 {
 	"schemaVersion": 1,
-	"id": "template-mod",
+	"id": "slide",
 	"version": "${version}",
-	"name": "Template Mod",
-	"description": "Template Mod for Architectury",
+	"name": "Slide",
+	"description": "Slide Mod",
 	"authors": [
-		"Template Author"
+		"bjl123"
 	],
 	"contact": {
-		"homepage": "https://github.com/example/template-mod",
-		"sources": "https://github.com/example/template-mod"
+		"homepage": "",
+		"sources": ""
 	},
 	"license": "MIT",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"com.example.template.TemplateMod"
+			"com.bjl123.slide.fabric.SlideModFabric"
 		],
 		"client": [
-			"com.example.template.client.ClientInit"
+			"com.bjl123.slide.fabric.client.SlideModFabricClient"
 		]
 	},
 	"mixins": [
-		"template-mod.mixins.json"
+		"slide.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.15.0",

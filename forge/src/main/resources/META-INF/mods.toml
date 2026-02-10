@@ -4,20 +4,20 @@ loaderVersion = "[47,)"
 license = "MIT"
 
 [[mods]]
-modId = "template-mod"
+modId = "slide"
 version = "${mod_version}"
-displayName = "Template Mod"
-authors = "Template Author"
-description = '''Template Mod for Architectury'''
+displayName = "Slide"
+authors = "bjl123"
+description = '''Slide Mod'''
 
-[[dependencies.template-mod]]
+[[dependencies.slide]]
 modId = "forge"
 mandatory = true
 versionRange = "[47,48)"
 ordering = "NONE"
 side = "BOTH"
 
-[[dependencies.template-mod]]
+[[dependencies.slide]]
 modId = "minecraft"
 mandatory = true
 versionRange = "[1.20.1,1.21)"

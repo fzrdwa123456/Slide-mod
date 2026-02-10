@@ -66,7 +66,6 @@ local.properties
 gradle-local.properties
 
 /.claude/
-/MCP-Reborn-1.20
 /.windsurf
 /1.0.0
 /tectonic
@@ -76,6 +75,7 @@ gradle-local.properties
 /common/.gradle
 **/.gradle/
 .gradle/
+/FirstPersonModel-1.20/
 /worldgen-roadweaver-analysis.md
 /nbt
 /AGENTS.md

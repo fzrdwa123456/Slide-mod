@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.bjl123.slide.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "fabric.PlayerMixin",
+    "EntityMixin"
+  ],
+  "client": [
+    "client.HumanoidModelMixin",
+    "client.InputMixin",
+    "client.KeyboardInputMixin",
+    "client.LocalPlayerMixin",
+    "client.LivingEntityRendererMixin",
+    "client.PlayerRendererMixin",
+    "compat.tacz.GunAnimationStateContextMixin"
+  ],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

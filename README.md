@@ -1,3 +1,81 @@
-# Template Mod
-A Minecraft 1.20.1 mod template using the Architectury framework.
-This is a clean template for creating new mods.
+# Slide Mod
+
+这是滑铲模组的源代码，由 bjl123 开发。
+
+## 功能
+
+- **滑铲机制**: 疾跑时按 C 键执行滑铲动作
+- **智能条件检测**: 只有在满足条件时才能滑铲
+- **状态管理**: 完整的滑铲状态生命周期管理
+- **跨平台支持**: 同时支持 Fabric 和 Forge 平台
+- **多语言支持**: 支持中文和英文
+
+## 滑铲机制
+
+### 触发条件
+1. **疾跑状态**: 玩家必须处于疾跑状态
+2. **疾跑时间**: 需要疾跑至少 0.5 秒（10 ticks）
+3. **地面接触**: 必须在地面上，不能在空中
+4. **环境限制**: 不能在水中或已经潜行时使用
+
+### 滑铲效果
+- **碰撞箱**: 变为潜行状态的碰撞箱（0.6×1.5 方块）
+- **视线高度**: 降低到潜行状态的视线高度（1.27 方块）
+- **持续时间**: 滑铲持续 2 秒（40 ticks）
+- **自动结束**: 停止疾跑、离开地面或进入水中时自动结束
+
+### 按键绑定
+
+- **滑铲**: C 键 (可在游戏设置中重新绑定)
+
+## 技术特性
+
+### 架构设计
+- **SOLID 原则**: 遵循单一职责、开闭、依赖倒置等设计原则
+- **线程安全**: 使用 ConcurrentHashMap 确保多线程安全
+- **状态管理**: 完整的滑铲状态生命周期管理
+- **异常处理**: 完善的错误处理和用户反馈
+
+### 代码结构
+```
+common/
+├── SlideState.java          # 滑铲状态管理
+├── SlideManager.java        # 全局状态管理器
+└── client/
+    ├── SlideKeyBindings.java    # 按键绑定管理
+    └── SlideClientEvents.java   # 客户端事件处理
+
+fabric/src/main/java/com/bjl123/slide/fabric/client/
+└── SlideModFabricClient.java    # Fabric平台适配
+
+forge/src/main/java/com/bjl123/slide/forge/client/
+└── SlideModForgeClient.java     # Forge平台适配
+```
+
+## 使用方法
+
+1. **启动游戏**: 使用 `./gradlew :fabric:runClient` 或 `./gradlew :forge:runClient`
+2. **进入游戏**: 创建或加载世界
+3. **开始疾跑**: 按住 Ctrl 键开始疾跑
+4. **执行滑铲**: 疾跑一段时间后按 C 键滑铲
+5. **观察效果**: 玩家会变为潜行姿态并显示滑铲消息
+
+## 开发
+
+本模组使用 Architectury 框架开发，遵循现代软件开发最佳实践：
+
+### 设计原则
+- **单一职责原则**: 每个类只负责一个功能
+- **开闭原则**: 通过扩展而非修改来添加功能
+- **依赖倒置原则**: 依赖抽象而非具体实现
+- **线程安全**: 使用并发安全的数据结构
+- **异常处理**: 完善的错误处理机制
+
+### 性能优化
+- **状态缓存**: 避免重复计算
+- **内存管理**: 及时清理不需要的状态
+- **并发控制**: 使用高效的并发数据结构
+
+## 许可证
+
+本项目采用 [GNU General Public License v3.0](LICENSE) 许可证。

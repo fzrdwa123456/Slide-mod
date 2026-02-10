@@ -1,0 +1,25 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.bjl123.slide.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "forge.PlayerMixin",
+    "forge.EntityMixin"
+  ],
+  "client": [
+    "forge.client.EntityRenderDispatcherMixin",
+    "forge.client.FireRenderDebugMixin",
+    "forge.client.HumanoidModelMixin",
+    "forge.client.InputMixin",
+    "forge.client.KeyboardInputMixin",
+    "forge.client.LivingEntityRendererMixin",
+    "forge.client.LocalPlayerMixin",
+    "forge.client.PlayerRendererMixin",
+    "compat.tacz.GunAnimationStateContextMixin"
+  ],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

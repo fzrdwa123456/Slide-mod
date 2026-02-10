@@ -9,7 +9,7 @@ architectury {
 
 loom {
     forge {
-        mixinConfig "template-mod.mixins.json"
+        mixinConfig "slide.mixins.json"
     }
     runs {
         client {
@@ -124,9 +124,8 @@ dependencies {
     // Forge 平台
     forge "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Architectury API - 使用 Jar-in-Jar 内嵌
+    // Architectury API - 作为外部依赖，用户需要单独安装
     modApi("dev.architectury:architectury-forge:9.2.14")
-    include("dev.architectury:architectury-forge:9.2.14")
 }
 
 // Source JAR 组装（合并 common 源码）

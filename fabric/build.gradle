@@ -36,11 +36,10 @@ dependencies {
 	// Fabric API
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 	
-	// Architectury API - 内嵌到模组中
+	// Architectury API - 作为外部依赖，用户需要单独安装
 	modImplementation("dev.architectury:architectury-fabric:9.2.14") {
 		exclude group: "net.fabricmc.fabric-api"
 	}
-	include("dev.architectury:architectury-fabric:9.2.14")
 }
 
 processResources {
