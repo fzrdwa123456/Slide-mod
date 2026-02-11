@@ -116,44 +116,58 @@ public class FirstPersonModelsCompat {
      * 滑铲时使用骑乘姿势 (riding=true)，所以动态同步 FPM 的坐姿偏移 (sitXOffset)
      * 这样用户调整 FPM 配置时，滑铲偏移也会自动同步
      */
+    // 用于平滑过渡的 Y 轴偏移值
+    private static float lastSlideYOffset = 0.0f;
+    private static final float SLIDE_Y_OFFSET = -0.35f;
+    private static final float Y_OFFSET_LERP_SPEED = 0.3f; // 过渡速度
+
     private static Vec3 applySlideOffset(AbstractClientPlayer entity, float delta, Vec3 original, Vec3 current) {
         if (!(entity instanceof PlayerAccessor accessor)) {
             return current;
         }
 
-        if (!accessor.slide$isSliding()) {
+        boolean isSliding = accessor.slide$isSliding();
+        boolean isForceCrouching = accessor.slide$isForceCrouching();
+        
+        // 计算目标 Y 偏移
+        float targetYOffset;
+        if (isSliding) {
+            // 滑铲中：完整的向下偏移
+            targetYOffset = SLIDE_Y_OFFSET;
+        } else if (isForceCrouching) {
+            // 强制潜行中（滑铲刚结束）：逐渐过渡到 0
+            targetYOffset = 0.0f;
+        } else {
+            // 正常状态：无偏移
+            targetYOffset = 0.0f;
+        }
+        
+        // 平滑插值 Y 偏移，避免突然跳变
+        if (Math.abs(lastSlideYOffset - targetYOffset) > 0.001f) {
+            lastSlideYOffset = lastSlideYOffset + (targetYOffset - lastSlideYOffset) * Y_OFFSET_LERP_SPEED;
+        } else {
+            lastSlideYOffset = targetYOffset;
+        }
+        
+        // 如果没有滑铲且 Y 偏移已经归零，直接返回
+        if (!isSliding && Math.abs(lastSlideYOffset) < 0.001f) {
+            lastSlideYOffset = 0.0f;
             return current;
         }
 
-        // 方案：直接使用 FPM 当前计算的偏移值
-        // current 已经包含了 original + FPM偏移
-        // FPM偏移 = current - original
-        // 滑铲时 FPM 使用正常站立偏移 (因为不是 isPassenger)
-        // 我们需要将其替换为坐姿偏移
-        
         // 获取 FPM 的站立偏移配置值
-        // 滑铲时直接使用站立偏移，与 FPM 正常站立时保持一致
         int xOffset = getFirstPersonModelXOffset();
         
         // 使用站立偏移公式: bodyOffset = 0.25f + (config.xOffset / 100f)
         float bodyOffset = 0.25f + (xOffset / 100.0f);
-        
-        // 调试输出
-        SlideMod.LOGGER.info("Slide FPM compat: xOffset={}, bodyOffset={}", xOffset, bodyOffset);
         
         // 计算玩家朝向的水平偏移
         double realYaw = net.minecraft.util.Mth.rotLerp(delta, entity.yBodyRotO, entity.yBodyRot);
         double x = bodyOffset * Math.sin(Math.toRadians(realYaw));
         double z = -bodyOffset * Math.cos(Math.toRadians(realYaw));
         
-        // Y 轴偏移：模拟坐姿效果
-        // 滑铲时玩家使用骑乘姿势 (riding=true)，但没有载具来调整 Y 位置
-        // 添加一个向下的偏移，使模型看起来像坐下一样
-        // 这个值可以根据实际效果调整
-        double y = -0.35;
-        
-        // 返回计算的偏移，完全替换 FPM 原本的偏移
-        return original.add(x, y, z);
+        // 返回计算的偏移，使用平滑过渡的 Y 值
+        return original.add(x, lastSlideYOffset, z);
     }
 
     // 缓存反射字段，避免每帧都查找
