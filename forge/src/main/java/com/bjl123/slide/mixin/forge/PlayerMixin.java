@@ -275,7 +275,56 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
             // 通过 EntityMixin 拦截 isSprinting() 和 getSharedFlag(3) 实现伪装
             // 不再强制清除疾跑标志位，这样玩家可以在滑铲期间按疾跑键
 
-            // 滑铲结束检测逻辑只在客户端执行，避免客户端和服务器端状态不同步
+            // 服务器端滑铲逻辑：空中检测、撞墙检测、自然结束
+            // 服务器端独立执行这些检测，确保即使客户端断开也能正确结束滑铲
+            if (sliding && !isClient) {
+                // 空中检测
+                if (!player.onGround()) {
+                    this.slide$airTicks++;
+                    if (this.slide$airTicks > 10) {
+                        this.slide$setSliding(false);
+                        sliding = false;
+                        this.slide$resetSlideState();
+                        player.refreshDimensions();
+                    }
+                } else {
+                    this.slide$airTicks = 0;
+                }
+                
+                // 撞墙检测
+                if (player.horizontalCollision && this.slide$wasSliding) {
+                    this.slide$sprintSlideCooldown = 10;
+                    this.slide$setSliding(false);
+                    sliding = false;
+                    this.slide$resetSlideState();
+                    player.refreshDimensions();
+                }
+                
+                // 骑乘检测
+                if (player.isPassenger()) {
+                    this.slide$sprintSlideCooldown = 10;
+                    this.slide$setSliding(false);
+                    sliding = false;
+                    this.slide$forceCrouchTicks = 0;
+                    this.slide$resetSlideState();
+                    player.refreshDimensions();
+                }
+                
+                // 自然结束检测（速度过低）
+                if (this.slide$sprintSlide && this.slide$noSlowTicks <= 0) {
+                    Vec3 currentMovement = player.getDeltaMovement();
+                    double currentSpeed = Math.sqrt(currentMovement.x * currentMovement.x + currentMovement.z * currentMovement.z);
+                    double naturalEndThreshold = 0.05D;
+                    if (currentSpeed < naturalEndThreshold) {
+                        this.slide$setSliding(false);
+                        sliding = false;
+                        this.slide$resetSlideState();
+                        player.refreshDimensions();
+                    }
+                }
+            }
+
+            // 客户端滑铲结束检测逻辑
             if (sliding && isClient) {
                 // 滑铲需要持续至少10个tick后才允许跳跃打断（noSlowTicks从15开始递减）
                 // 这样可以防止滑铲刚开始就被跳跃打断导致速度叠加
@@ -292,7 +341,8 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     // ));
                     this.slide$jumpCancelled = true;
                     this.slide$sprintSlideCooldown = 10;
-                    SlideNetworking.sendSlidePacket(false);
+                    boolean holdingSneak = this.slide$isHoldingSneakKey(player);
+                    SlideNetworking.sendSlidePacket(false, holdingSneak);
                     this.slide$setSliding(false);
                     sliding = false;
                     // 必须在 setSliding(false) 之后调用，否则 getDimensions 仍返回滑铲尺寸
@@ -304,7 +354,8 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     if (this.slide$sprintSlide && this.slide$noSlowTicks <= 0) {
                         double naturalEndThreshold = 0.05D;
                         if (currentSpeed < naturalEndThreshold) {
-                            SlideNetworking.sendSlidePacket(false);
+                            boolean holdingSneak = this.slide$isHoldingSneakKey(player);
+                            SlideNetworking.sendSlidePacket(false, holdingSneak);
                             this.slide$setSliding(false);
                             sliding = false;
                             // 必须在 setSliding(false) 之后调用
@@ -316,7 +367,8 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     if (!player.onGround()) {
                         this.slide$airTicks++;
                         if (this.slide$airTicks > 10) {
-                            SlideNetworking.sendSlidePacket(false);
+                            boolean holdingSneak = this.slide$isHoldingSneakKey(player);
+                            SlideNetworking.sendSlidePacket(false, holdingSneak);
                             this.slide$setSliding(false);
                             sliding = false;
                             // 必须在 setSliding(false) 之后调用
@@ -329,7 +381,8 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     // 撞墙检测
                     if (player.horizontalCollision && this.slide$wasSliding) {
                         this.slide$sprintSlideCooldown = 10;
-                        SlideNetworking.sendSlidePacket(false);
+                        boolean holdingSneak = this.slide$isHoldingSneakKey(player);
+                        SlideNetworking.sendSlidePacket(false, holdingSneak);
                         this.slide$setSliding(false);
                         sliding = false;
                         // 必须在 setSliding(false) 之后调用
@@ -342,7 +395,7 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     // 因为骑乘时姿势由原版 startRiding 设置为 STANDING
                     if (player.isPassenger()) {
                         this.slide$sprintSlideCooldown = 10;
-                        SlideNetworking.sendSlidePacket(false);
+                        SlideNetworking.sendSlidePacket(false, false);
                         this.slide$setSliding(false);
                         sliding = false;
                         this.slide$forceCrouchTicks = 0;

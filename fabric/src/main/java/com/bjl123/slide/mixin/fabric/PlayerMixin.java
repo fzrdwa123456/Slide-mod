@@ -244,8 +244,9 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     ));
                     this.slide$jumpCancelled = true;
                     this.slide$sprintSlideCooldown = 10;
+                    boolean holdingSneak = this.slide$isHoldingSneakKey(player);
                     this.slide$endSlideWithPoseCheck(player);
-                    SlideNetworking.sendSlidePacket(false);
+                    SlideNetworking.sendSlidePacket(false, holdingSneak);
                     this.slide$setSliding(false);
                     sliding = false;
                 } else {
@@ -255,8 +256,9 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     if (this.slide$sprintSlide && this.slide$noSlowTicks <= 0) {
                         double naturalEndThreshold = 0.05D;
                         if (currentSpeed < naturalEndThreshold) {
+                            boolean holdingSneak = this.slide$isHoldingSneakKey(player);
                             this.slide$endSlideWithPoseCheck(player);
-                            SlideNetworking.sendSlidePacket(false);
+                            SlideNetworking.sendSlidePacket(false, holdingSneak);
                             this.slide$setSliding(false);
                             sliding = false;
                         }
@@ -266,8 +268,9 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     if (!player.onGround()) {
                         this.slide$airTicks++;
                         if (this.slide$airTicks > 10) {
+                            boolean holdingSneak = this.slide$isHoldingSneakKey(player);
                             this.slide$endSlideWithPoseCheck(player);
-                            SlideNetworking.sendSlidePacket(false);
+                            SlideNetworking.sendSlidePacket(false, holdingSneak);
                             this.slide$setSliding(false);
                             sliding = false;
                         }
@@ -278,8 +281,9 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     // 撞墙检测
                     if (player.horizontalCollision && this.slide$wasSliding) {
                         this.slide$sprintSlideCooldown = 10;
+                        boolean holdingSneak = this.slide$isHoldingSneakKey(player);
                         this.slide$endSlideWithPoseCheck(player);
-                        SlideNetworking.sendSlidePacket(false);
+                        SlideNetworking.sendSlidePacket(false, holdingSneak);
                         this.slide$setSliding(false);
                         sliding = false;
                     }
@@ -290,7 +294,7 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     // 因为骑乘时姿势由原版 startRiding 设置为 STANDING
                     if (player.isPassenger()) {
                         this.slide$sprintSlideCooldown = 10;
-                        SlideNetworking.sendSlidePacket(false);
+                        SlideNetworking.sendSlidePacket(false, false);
                         this.slide$setSliding(false);
                         sliding = false;
                         this.slide$forceCrouchTicks = 0;
@@ -433,6 +437,19 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
             player.setPose(Pose.STANDING);
             player.refreshDimensions();
         }
+    }
+
+    /**
+     * 检查玩家是否正在按着潜行键
+     * 直接检查 Minecraft 的按键绑定状态，而不是被修改过的 input.shiftKeyDown
+     */
+    @Unique
+    private boolean slide$isHoldingSneakKey(Player player) {
+        if (player.level().isClientSide && player instanceof net.minecraft.client.player.LocalPlayer) {
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            return mc.options.keyShift.isDown();
+        }
+        return false;
     }
 
     @Unique

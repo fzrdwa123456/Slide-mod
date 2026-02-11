@@ -16,6 +16,7 @@ public class SlideNetworking {
         // 注册 C2S 包接收器
         NetworkManager.registerReceiver(NetworkManager.Side.C2S, SLIDE_PACKET_ID, (buf, context) -> {
             boolean isSliding = buf.readBoolean();
+            boolean isHoldingSneak = buf.readBoolean(); // 客户端是否按着潜行键
             
             context.queue(() -> {
                 if (context.getPlayer() instanceof ServerPlayer player) {
@@ -54,8 +55,14 @@ public class SlideNetworking {
                     } else {
                         // 滑铲结束时，重置服务器端的滑铲状态变量
                         playerAccessor.slide$resetSlideState();
-                        // 不直接设置为 STANDING，让客户端的 PlayerMixin 检测头顶空间后决定姿势
-                        // 服务器端保持 CROUCHING，避免在低矮空间中"顶一下"
+                        
+                        // 根据客户端传来的潜行键状态决定姿势
+                        // 如果按着潜行键，保持潜行姿势，避免碰撞箱跳变
+                        if (isHoldingSneak) {
+                            player.setPose(Pose.CROUCHING);
+                            player.setShiftKeyDown(true);
+                        }
+                        // 如果没按潜行键，让原版逻辑处理姿势
                     }
                     player.refreshDimensions(); // 刷新碰撞箱
                 }
@@ -64,9 +71,10 @@ public class SlideNetworking {
     }
 
     // 发送包的方法
-    public static void sendSlidePacket(boolean isSliding) {
+    public static void sendSlidePacket(boolean isSliding, boolean isHoldingSneak) {
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         buf.writeBoolean(isSliding);
+        buf.writeBoolean(isHoldingSneak);
         NetworkManager.sendToServer(SLIDE_PACKET_ID, buf);
     }
 }

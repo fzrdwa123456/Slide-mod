@@ -60,7 +60,8 @@ public class SlideKeyBindings {
                 
                 // 如果已经在滑铲，点击C键停止滑铲
                 if (playerAccessor.slide$isSliding()) {
-                    SlideNetworking.sendSlidePacket(false);
+                    boolean holdingSneak = client.options.keyShift.isDown();
+                    SlideNetworking.sendSlidePacket(false, holdingSneak);
                     playerAccessor.slide$setSliding(false);
                     return;
                 }
@@ -104,7 +105,7 @@ public class SlideKeyBindings {
                 }
                 
                 // 开始疾跑滑铲
-                SlideNetworking.sendSlidePacket(true);
+                SlideNetworking.sendSlidePacket(true, false);
                 playerAccessor.slide$setSliding(true);
             }
         });

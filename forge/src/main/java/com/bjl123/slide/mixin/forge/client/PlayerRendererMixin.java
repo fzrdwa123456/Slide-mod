@@ -63,6 +63,13 @@ public class PlayerRendererMixin {
         PlayerRenderer renderer = (PlayerRenderer) (Object) this;
         PlayerModel<AbstractClientPlayer> model = renderer.getModel();
         
+        // 滑铲期间：强制 crouching = false，避免与 riding 姿势叠加
+        // 这样联机时其他玩家只会看到坐下姿势，不会看到坐下+潜行的组合
+        if (accessor.slide$isSliding()) {
+            model.crouching = false;
+            return;
+        }
+        
         // 强制潜行期间（滑铲结束后头顶有方块）设置 crouching = true
         if (accessor.slide$isForceCrouching()) {
             model.crouching = true;
@@ -71,14 +78,12 @@ public class PlayerRendererMixin {
         
         // 滑铲刚结束时，如果玩家按着潜行键，也强制显示潜行姿势
         // 这样可以避免一帧站立动作
-        if (!accessor.slide$isSliding()) {
-            // 检查是否是本地玩家且按着潜行键
-            Minecraft mc = Minecraft.getInstance();
-            if (mc.player == player) {
-                // 直接检查按键绑定状态，而不是 input.shiftKeyDown（因为它在滑铲期间被清除）
-                if (mc.options.keyShift.isDown()) {
-                    model.crouching = true;
-                }
+        // 检查是否是本地玩家且按着潜行键
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == player) {
+            // 直接检查按键绑定状态，而不是 input.shiftKeyDown（因为它在滑铲期间被清除）
+            if (mc.options.keyShift.isDown()) {
+                model.crouching = true;
             }
         }
     }
