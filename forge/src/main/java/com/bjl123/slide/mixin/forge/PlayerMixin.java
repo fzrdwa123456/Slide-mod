@@ -36,6 +36,7 @@ import java.util.UUID;
 @Mixin(Player.class)
 public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor {
 
+
     @Shadow public float bob;
     @Shadow public float oBob;
 
@@ -74,6 +75,7 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
 
     @Unique
     private int slide$forceCrouchTicks = 0;
+
 
     protected PlayerMixin(EntityType<? extends LivingEntity> entityType, Level level) {
         super(entityType, level);
@@ -138,6 +140,23 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
         return false;
     }
 
+    @Override
+    public boolean slide$canJumpCancel() {
+        // 滑铲后期（noSlowTicks <= 5）才允许跳跃打断
+        return this.slide$isSliding() && this.slide$noSlowTicks <= 5;
+    }
+
+    /**
+     * 拦截跳跃方法，滑铲开始阶段禁止跳跃
+     */
+    @Inject(method = "jumpFromGround", at = @At("HEAD"), cancellable = true)
+    private void slide$preventJumpWhileSliding(CallbackInfo ci) {
+        // 滑铲期间且不允许跳跃打断时，取消跳跃
+        if (this.slide$isSliding() && !this.slide$canJumpCancel()) {
+            ci.cancel();
+        }
+    }
+
     @Inject(method = "aiStep", at = @At("TAIL"))
     private void slide$forgeAiStep(CallbackInfo ci) {
         this.slide$handleSlideLogic();
@@ -171,19 +190,14 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
             return;
         }
         
-        // 在强制潜行期间，阻止 updatePlayerPose 将姿势改为 STANDING
+        // 在强制潜行期间（头顶有障碍物），阻止 updatePlayerPose 将姿势改为 STANDING
         if (this.slide$forceCrouchTicks > 0) {
             player.setPose(Pose.CROUCHING);
             ci.cancel();
             return;
         }
         
-        // 如果玩家正在按着潜行键，保持潜行姿势
-        if (this.slide$isHoldingSneakKey(player)) {
-            player.setPose(Pose.CROUCHING);
-            ci.cancel();
-            return;
-        }
+        // 其他情况让原版逻辑处理（包括正常的潜行键按下）
     }
 
     @Unique
@@ -240,11 +254,14 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 this.slide$slideDirZ = slideDirection.z;
 
                 // 只在客户端应用初始冲力，避免重复
+                // 使用固定速度而不是叠加，防止速度累积
                 if (isClient) {
                     Vec3 impulse = new Vec3(this.slide$slideDirX, 0.0D, this.slide$slideDirZ);
                     if (impulse.lengthSqr() > 1.0E-6D) {
                         impulse = impulse.normalize().scale(0.75D);
-                        player.setDeltaMovement(player.getDeltaMovement().add(impulse));
+                        Vec3 currentMovement = player.getDeltaMovement();
+                        // 直接设置水平速度为固定值，不叠加
+                        player.setDeltaMovement(new Vec3(impulse.x, currentMovement.y, impulse.z));
                     }
                 }
             }
@@ -260,16 +277,19 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
 
             // 滑铲结束检测逻辑只在客户端执行，避免客户端和服务器端状态不同步
             if (sliding && isClient) {
-                // 只有在滑铲已经持续至少一个tick后才允许跳跃打断，避免刚开始滑铲就被打断
-                if (this.jumping && this.slide$wasSliding) {
-                    // 滑铲跳：给玩家额外的向前冲力
-                    Vec3 dm = player.getDeltaMovement();
-                    double forwardBoost = 0.08D;
-                    player.setDeltaMovement(new Vec3(
-                        dm.x + this.slide$slideDirX * forwardBoost,
-                        dm.y,
-                        dm.z + this.slide$slideDirZ * forwardBoost
-                    ));
+                // 滑铲需要持续至少10个tick后才允许跳跃打断（noSlowTicks从15开始递减）
+                // 这样可以防止滑铲刚开始就被跳跃打断导致速度叠加
+                boolean canJumpCancel = this.slide$noSlowTicks <= 5;
+                
+                if (this.jumping && this.slide$wasSliding && canJumpCancel) {
+                    // 滑铲跳：给玩家额外的向前冲力（暂时禁用）
+                    // Vec3 dm = player.getDeltaMovement();
+                    // double forwardBoost = 0.08D;
+                    // player.setDeltaMovement(new Vec3(
+                    //     dm.x + this.slide$slideDirX * forwardBoost,
+                    //     dm.y,
+                    //     dm.z + this.slide$slideDirZ * forwardBoost
+                    // ));
                     this.slide$jumpCancelled = true;
                     this.slide$sprintSlideCooldown = 10;
                     SlideNetworking.sendSlidePacket(false);
@@ -355,16 +375,15 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
 
             if (!sliding) {
                 if (this.slide$wasSliding) {
-                    // 跳跃打断时不应用摩擦力，保留滑铲跳冲力
-                    if (!this.slide$jumpCancelled) {
-                        Vec3 dm = player.getDeltaMovement();
-                        double horizontalSpeed = Math.sqrt(dm.x * dm.x + dm.z * dm.z);
-                        if (horizontalSpeed > 0.05D) {
-                            double friction = 0.3D;
-                            player.setDeltaMovement(new Vec3(dm.x * friction, dm.y, dm.z * friction));
-                        } else {
-                            player.setDeltaMovement(new Vec3(0.0D, dm.y, 0.0D));
-                        }
+                    // 无论是正常结束还是跳跃打断，都应用摩擦力，防止速度叠加
+                    Vec3 dm = player.getDeltaMovement();
+                    double horizontalSpeed = Math.sqrt(dm.x * dm.x + dm.z * dm.z);
+                    if (horizontalSpeed > 0.05D) {
+                        // 跳跃打断时使用较小的摩擦力，保留一些冲力但不会叠加
+                        double friction = this.slide$jumpCancelled ? 0.5D : 0.3D;
+                        player.setDeltaMovement(new Vec3(dm.x * friction, dm.y, dm.z * friction));
+                    } else {
+                        player.setDeltaMovement(new Vec3(0.0D, dm.y, 0.0D));
                     }
                     
                     if (this.slide$sprintSlide) {
@@ -423,10 +442,9 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
         try {
             boolean sliding = this.slide$isSliding();
             boolean forceCrouch = this.slide$forceCrouchTicks > 0;
-            boolean holdingSneak = this.slide$isHoldingSneakKey((Player)(Object)this);
             
-            // 滑铲期间、滑铲刚结束时或按着潜行键时，返回潜行视线高度
-            if (sliding || forceCrouch || holdingSneak) {
+            // 滑铲期间或强制潜行期间（头顶有障碍物），返回潜行视线高度
+            if (sliding || forceCrouch) {
                 cir.setReturnValue(1.27F);
             }
         } catch (Exception e) {
@@ -439,18 +457,16 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
             boolean sliding = this.slide$isSliding();
             boolean passenger = this.isPassenger();
             boolean forceCrouch = this.slide$forceCrouchTicks > 0;
-            boolean holdingSneak = this.slide$isHoldingSneakKey((Player)(Object)this);
             
             // 骑乘时不返回滑铲尺寸，确保碰撞箱正确
+            // 使用 scalable 而不是 fixed，与潜行碰撞箱类型一致，避免切换时跳变
             if (sliding && !passenger) {
-                cir.setReturnValue(EntityDimensions.fixed(0.6F, 1.5F));
+                cir.setReturnValue(EntityDimensions.scalable(0.6F, 1.5F));
                 return;
             }
             
-            // 滑铲刚结束时（forceCrouchTicks > 0）或按着潜行键时，强制返回潜行尺寸
-            // 这样可以避免碰撞箱先变成站立再变成潜行
-            if ((forceCrouch || holdingSneak) && !passenger) {
-                // 无论 pose 是什么，都返回潜行尺寸
+            // 强制潜行期间（头顶有障碍物），强制返回潜行尺寸
+            if (forceCrouch && !passenger) {
                 cir.setReturnValue(EntityDimensions.scalable(0.6F, 1.5F));
             }
         } catch (Exception e) {
@@ -462,13 +478,25 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
         boolean canStand = this.slide$canStandUp(player);
         boolean isHoldingSneak = this.slide$isHoldingSneakKey(player);
         
-        // 如果玩家正在按着潜行键，或者头顶有障碍物无法站起来，则保持潜行姿势
-        if (!canStand || isHoldingSneak) {
+        // 情况1：头顶有障碍物无法站起来 -> 强制潜行
+        if (!canStand) {
             this.slide$forceCrouchTicks = 5;
             player.setPose(Pose.CROUCHING);
             player.setShiftKeyDown(true);
             player.refreshDimensions();
-        } else {
+        }
+        // 情况2：按着潜行键且不是跳跃结束 -> 直接衔接潜行状态
+        // 设置 forceCrouchTicks=3 让 updatePlayerPose 保持潜行姿势三帧，
+        // 等待 KeyboardInput.tick() 正确设置 input.shiftKeyDown 后原版逻辑接管
+        // 使用3帧确保碰撞箱和视线高度不会在过渡期间跳变
+        else if (isHoldingSneak && !this.jumping) {
+            this.slide$forceCrouchTicks = 3;
+            player.setPose(Pose.CROUCHING);
+            player.setShiftKeyDown(true);
+            player.refreshDimensions();
+        }
+        // 情况3：其他情况（跳跃结束或没按潜行键）-> 站立
+        else {
             this.slide$forceCrouchTicks = 0;
             player.setPose(Pose.STANDING);
             player.refreshDimensions();

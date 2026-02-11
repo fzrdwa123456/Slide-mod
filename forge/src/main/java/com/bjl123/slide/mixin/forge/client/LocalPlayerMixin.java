@@ -29,13 +29,20 @@ public abstract class LocalPlayerMixin extends Player {
     }
     
     /**
-     * 在 aiStep() 开始时，滑铲期间清除 input.shiftKeyDown
+     * 在 aiStep() 开始时，滑铲期间清除 input.shiftKeyDown 和 input.jumping
+     * 阻止滑铲期间跳跃，防止玩家以滑铲姿势跳起来
      */
     @Inject(method = "aiStep", at = @At("HEAD"))
     private void slide$clearShiftKeyDownBeforeAiStep(CallbackInfo ci) {
         PlayerAccessor accessor = (PlayerAccessor) this;
         if (accessor.slide$isSliding() && this.input != null) {
             this.input.shiftKeyDown = false;
+            boolean canJumpCancel = accessor.slide$canJumpCancel();
+            // 滑铲开始阶段禁止跳跃（noSlowTicks > 5 时），防止以滑铲姿势跳起
+            // 滑铲后期（noSlowTicks <= 5）允许跳跃打断
+            if (!canJumpCancel) {
+                this.input.jumping = false;
+            }
         }
     }
 

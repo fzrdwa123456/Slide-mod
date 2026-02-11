@@ -22,6 +22,9 @@ public class SlideKeyBindings {
 
     // 客户端按键冷却时间，防止按住时反复触发
     private static int keyPressCooldown = 0;
+    
+    // 追踪按键是否已经释放，只有释放后再按下才能触发下一次滑铲
+    private static boolean keyWasReleased = true;
 
     public static void init() {
         // 注册按键
@@ -42,10 +45,18 @@ public class SlideKeyBindings {
 
             PlayerAccessor playerAccessor = (PlayerAccessor) client.player;
             
+            // 检查按键是否被释放
+            if (!SLIDE_KEY.isDown()) {
+                keyWasReleased = true;
+            }
+            
             // 检查是否有按键点击事件（按一下触发）
-            if (SLIDE_KEY.consumeClick() && keyPressCooldown <= 0) {
-                // 设置按键冷却时间（10 ticks = 0.5秒），防止按住时反复触发
-                keyPressCooldown = 10; // 从5增加到10 ticks
+            // 必须满足：按键被按下、按键之前已经释放过、冷却时间已结束
+            if (SLIDE_KEY.isDown() && keyWasReleased && keyPressCooldown <= 0) {
+                // 标记按键已被使用，需要释放后才能再次触发
+                keyWasReleased = false;
+                // 设置按键冷却时间（10 ticks = 0.5秒），防止快速连按
+                keyPressCooldown = 10;
                 
                 // 如果已经在滑铲，点击C键停止滑铲
                 if (playerAccessor.slide$isSliding()) {
@@ -61,6 +72,12 @@ public class SlideKeyBindings {
                     return;
                 }
                 
+                // 检查是否正在跳跃 - 防止同时按滑铲和跳跃导致以滑铲姿势跳起
+                if (client.options.keyJump.isDown()) {
+                    // 跳跃键按下时不允许滑铲
+                    return;
+                }
+                
                 // 检查是否在流体中（水、岩浆、其他 mod 的流体）
                 if (isInAnyFluid(client.player)) {
                     // 在流体中不允许滑铲
@@ -70,6 +87,13 @@ public class SlideKeyBindings {
                 // 检查是否为疾跑状态 - 只有疾跑时才能触发滑铲
                 if (!client.player.isSprinting()) {
                     // 非疾跑状态不允许滑铲
+                    return;
+                }
+                
+                // 检查是否正在潜行 - 潜行时不能滑铲
+                // 包括：正常潜行、按着潜行键、强制潜行（在1.5格空间内）
+                if (client.player.isCrouching() || client.player.isShiftKeyDown() || playerAccessor.slide$isForceCrouching()) {
+                    // 潜行状态不允许滑铲
                     return;
                 }
                 
