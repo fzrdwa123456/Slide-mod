@@ -4,6 +4,7 @@ import com.bjl123.slide.SlideMod;
 import com.bjl123.slide.compat.TaczCompat;
 import com.bjl123.slide.duck.PlayerAccessor;
 import com.bjl123.slide.network.SlideNetworking;
+import com.bjl123.slide.sound.ModSounds;
 import com.bjl123.slide.state.SlideState;
 import com.bjl123.slide.util.EntityDataHelper;
 import com.mojang.authlib.GameProfile;
@@ -20,6 +21,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -366,6 +368,12 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 this.slide$sprintSlideCooldown = 0;
                 this.slide$airTicks = 0;
                 this.slide$state = SlideState.SLIDING;
+                
+                // 播放滑铲音效（在客户端直接播放，更可靠）
+                if (isClient) {
+                    player.level().playSound(player, player.getX(), player.getY(), player.getZ(),
+                        ModSounds.SLIDE_SOUND, SoundSource.PLAYERS, 1.0F, 1.0F);
+                }
 
                 Vec3 slideDirection = this.slide$calculateSlideDirection(player);
                 this.slide$slideDirX = slideDirection.x;

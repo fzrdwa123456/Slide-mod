@@ -186,17 +186,6 @@ public class FirstPersonModelsCompat {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
             Class<?> coreClass = Class.forName("dev.tr7zw.firstperson.FirstPersonModelCore", true, classLoader);
             configField = coreClass.getField("config");
-            
-            // 输出调试信息
-            Object config = configField.get(null);
-            SlideMod.LOGGER.info("FPM reflection initialized: coreClass={}, configField={}, config={}", 
-                coreClass.getName(), configField, config);
-            if (config != null) {
-                SlideMod.LOGGER.info("FPM config object class: {}, classLoader: {}", 
-                    config.getClass().getName(), config.getClass().getClassLoader());
-            }
-            
-            SlideMod.LOGGER.info("FPM reflection fields initialized successfully");
         } catch (Exception e) {
             SlideMod.LOGGER.warn("Failed to initialize FPM reflection fields", e);
         }
@@ -227,11 +216,9 @@ public class FirstPersonModelsCompat {
                 if (json.has("xOffset")) {
                     cachedXOffset = json.get("xOffset").getAsInt();
                 }
-                
-                SlideMod.LOGGER.info("FPM config read from file: xOffset={}", cachedXOffset);
             }
         } catch (Exception e) {
-            SlideMod.LOGGER.warn("Failed to read FPM config from file", e);
+            // Silently ignore config read failures
         }
     }
 
