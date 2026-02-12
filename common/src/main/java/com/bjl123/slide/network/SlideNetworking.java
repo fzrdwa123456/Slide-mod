@@ -8,9 +8,12 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 
 public class SlideNetworking {
     public static final ResourceLocation SLIDE_PACKET_ID = new ResourceLocation(SlideMod.MOD_ID, "slide_toggle");
+    public static final ResourceLocation SLIDE_STATE_SYNC_ID = new ResourceLocation(SlideMod.MOD_ID, "slide_state_sync");
 
     public static void init() {
         // 注册 C2S 包接收器
@@ -56,15 +59,46 @@ public class SlideNetworking {
                         // 滑铲结束时，重置服务器端的滑铲状态变量
                         playerAccessor.slide$resetSlideState();
                         
+                        // 设置安全检查延迟，等待客户端-服务器状态同步
+                        playerAccessor.slide$setSafetyCheckDelay(5);
+                        
                         // 根据客户端传来的潜行键状态决定姿势
-                        // 如果按着潜行键，保持潜行姿势，避免碰撞箱跳变
                         if (isHoldingSneak) {
+                            // 按着潜行键，保持潜行姿势
                             player.setPose(Pose.CROUCHING);
                             player.setShiftKeyDown(true);
+                        } else {
+                            // 没按潜行键，检查头顶空间并设置正确姿势
+                            boolean canStand = canStandUp(player);
+                            if (canStand) {
+                                player.setPose(Pose.STANDING);
+                            } else {
+                                // 头顶有障碍物，保持潜行
+                                player.setPose(Pose.CROUCHING);
+                                player.setShiftKeyDown(true);
+                            }
                         }
-                        // 如果没按潜行键，让原版逻辑处理姿势
                     }
                     player.refreshDimensions(); // 刷新碰撞箱
+                }
+            });
+        });
+        
+        // 注册状态同步包接收器
+        NetworkManager.registerReceiver(NetworkManager.Side.C2S, SLIDE_STATE_SYNC_ID, (buf, context) -> {
+            boolean shouldStand = buf.readBoolean();
+            
+            context.queue(() -> {
+                if (context.getPlayer() instanceof ServerPlayer player) {
+                    if (shouldStand) {
+                        // 客户端通知服务器端玩家应该站立
+                        boolean canStand = canStandUp(player);
+                        if (canStand) {
+                            player.setPose(Pose.STANDING);
+                            player.setShiftKeyDown(false);
+                            player.refreshDimensions();
+                        }
+                    }
                 }
             });
         });
@@ -76,5 +110,25 @@ public class SlideNetworking {
         buf.writeBoolean(isSliding);
         buf.writeBoolean(isHoldingSneak);
         NetworkManager.sendToServer(SLIDE_PACKET_ID, buf);
+    }
+    
+    /**
+     * 发送状态同步包，通知服务器端玩家应该站立
+     */
+    public static void sendStateSyncPacket(boolean shouldStand) {
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        buf.writeBoolean(shouldStand);
+        NetworkManager.sendToServer(SLIDE_STATE_SYNC_ID, buf);
+    }
+
+    /**
+     * 检查玩家头顶是否有足够空间站立
+     */
+    private static boolean canStandUp(Player player) {
+        double standingHeight = 1.8D;
+        double crouchingHeight = 1.5D;
+        
+        AABB standingBox = player.getBoundingBox().expandTowards(0, standingHeight - crouchingHeight, 0);
+        return player.level().noCollision(player, standingBox);
     }
 }

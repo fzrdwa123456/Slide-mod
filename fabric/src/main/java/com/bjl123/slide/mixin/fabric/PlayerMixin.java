@@ -3,6 +3,7 @@ package com.bjl123.slide.mixin.fabric;
 import com.bjl123.slide.compat.TaczCompat;
 import com.bjl123.slide.duck.PlayerAccessor;
 import com.bjl123.slide.network.SlideNetworking;
+import com.bjl123.slide.state.SlideState;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -30,7 +31,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.UUID;
 
 /**
- * Fabric版本的PlayerMixin，使用tick方法注入
+ * Fabric版本的PlayerMixin，使用状态机管理滑铲逻辑
  */
 @Mixin(Player.class)
 public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor {
@@ -44,6 +45,14 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
     @Unique
     private static final UUID SLIDE_SLOWDOWN_ID = UUID.fromString("d723d3f9-8a7d-4a7a-bc7b-9c2d2e20d0a6");
 
+    // ==================== 状态机核心 ====================
+    @Unique
+    private SlideState slide$state = SlideState.IDLE;
+    
+    @Unique
+    private int slide$stateTimer = 0;
+
+    // ==================== 滑铲参数 ====================
     @Unique
     private boolean slide$wasSliding;
 
@@ -71,9 +80,6 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
     @Unique
     private boolean slide$isProcessing = false;
 
-    @Unique
-    private int slide$forceCrouchTicks = 0;
-
     protected PlayerMixin(EntityType<? extends LivingEntity> entityType, Level level) {
         super(entityType, level);
     }
@@ -83,6 +89,8 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
         this.entityData.define(IS_SLIDING, false);
     }
 
+    // ==================== PlayerAccessor 接口实现 ====================
+    
     @Override
     public boolean slide$isSliding() {
         try {
@@ -99,7 +107,7 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
 
     @Override
     public boolean slide$canSlide() {
-        return this.slide$sprintSlideCooldown <= 0;
+        return this.slide$sprintSlideCooldown <= 0 && this.slide$state == SlideState.IDLE;
     }
 
     @Override
@@ -115,55 +123,176 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
 
     @Override
     public boolean slide$shouldShowCrouchPose() {
-        // 滑铲中或强制潜行中都应该显示潜行姿势
-        return this.slide$isSliding() || this.slide$forceCrouchTicks > 0;
+        return this.slide$isSliding() || this.slide$state == SlideState.ENDING_TO_CROUCH;
     }
 
     @Override
     public boolean slide$isForceCrouching() {
-        // 只有在强制潜行期间（滑铲已结束）才返回 true
-        return !this.slide$isSliding() && this.slide$forceCrouchTicks > 0;
+        if (this.slide$isSliding()) {
+            return false;
+        }
+        if (this.slide$state == SlideState.ENDING_TO_CROUCH) {
+            return true;
+        }
+        Player player = (Player) (Object) this;
+        if (player.getPose() == Pose.CROUCHING && !this.slide$canStandUp(player)) {
+            return true;
+        }
+        return false;
     }
+
+    @Override
+    public void slide$setSafetyCheckDelay(int ticks) {
+        // 状态机模式下不再需要此方法，保留接口兼容
+    }
+
+    // ==================== 状态机核心方法 ====================
+
+    @Unique
+    private void slide$transitionTo(SlideState newState, int timer) {
+        if (this.slide$state != newState) {
+            this.slide$state = newState;
+            this.slide$stateTimer = timer;
+        }
+    }
+
+    @Unique
+    private void slide$updateStateMachine(Player player, boolean isClient) {
+        boolean canStand = this.slide$canStandUp(player);
+        boolean holdingSneak = isClient ? this.slide$isHoldingSneakKey(player) : player.isShiftKeyDown();
+        
+        switch (this.slide$state) {
+            case IDLE:
+                if (this.slide$isSliding() && !this.slide$sprintSlide) {
+                    this.slide$transitionTo(SlideState.SLIDING, 0);
+                }
+                // 修复原版延迟：IDLE 状态下检测并修复碰撞箱异常
+                else if (canStand && player.getPose() == Pose.CROUCHING && 
+                         !player.isSwimming() && !player.isFallFlying() && !player.isSleeping()) {
+                    if (isClient) {
+                        if (!holdingSneak) {
+                            player.setPose(Pose.STANDING);
+                            player.refreshDimensions();
+                        }
+                    } else {
+                        if (player.getBbHeight() < 1.6F && !player.isShiftKeyDown()) {
+                            player.setPose(Pose.STANDING);
+                            player.refreshDimensions();
+                        }
+                    }
+                }
+                break;
+                
+            case SLIDING:
+                if (!this.slide$isSliding()) {
+                    if (!canStand) {
+                        this.slide$transitionTo(SlideState.ENDING_TO_CROUCH, 10);
+                        player.setPose(Pose.CROUCHING);
+                        player.setShiftKeyDown(true);
+                    } else if (holdingSneak && !this.slide$jumpCancelled) {
+                        this.slide$transitionTo(SlideState.ENDING_TO_CROUCH, 5);
+                        player.setPose(Pose.CROUCHING);
+                        player.setShiftKeyDown(true);
+                    } else {
+                        this.slide$transitionTo(SlideState.ENDING_TO_STAND, 5);
+                        player.setPose(Pose.STANDING);
+                        player.setShiftKeyDown(false);
+                    }
+                    player.refreshDimensions();
+                }
+                break;
+                
+            case ENDING_TO_CROUCH:
+                if (!canStand) {
+                    this.slide$stateTimer = 10;
+                    player.setPose(Pose.CROUCHING);
+                    player.setShiftKeyDown(true);
+                } else if (!holdingSneak) {
+                    // 发送同步包通知服务器端玩家应该站立
+                    if (isClient) {
+                        SlideNetworking.sendStateSyncPacket(true);
+                    }
+                    this.slide$transitionTo(SlideState.ENDING_TO_STAND, 3);
+                    player.setPose(Pose.STANDING);
+                    player.setShiftKeyDown(false);
+                    player.refreshDimensions();
+                } else {
+                    this.slide$stateTimer--;
+                    player.setPose(Pose.CROUCHING);
+                    player.setShiftKeyDown(true);
+                    
+                    if (this.slide$stateTimer <= 0) {
+                        // 计时器到期时再次检查潜行键状态，确保正确设置姿势
+                        if (!holdingSneak && canStand) {
+                            player.setPose(Pose.STANDING);
+                            player.setShiftKeyDown(false);
+                            player.refreshDimensions();
+                        }
+                        this.slide$transitionTo(SlideState.IDLE, 0);
+                    }
+                }
+                break;
+                
+            case ENDING_TO_STAND:
+                if (holdingSneak) {
+                    this.slide$transitionTo(SlideState.IDLE, 0);
+                } else {
+                    this.slide$stateTimer--;
+                    player.setPose(Pose.STANDING);
+                    
+                    if (this.slide$stateTimer <= 0) {
+                        this.slide$transitionTo(SlideState.IDLE, 0);
+                    }
+                }
+                break;
+        }
+    }
+
+    // ==================== 注入点 ====================
 
     @Inject(method = "tick", at = @At("TAIL"))
     private void slide$fabricTick(CallbackInfo ci) {
+        Player player = (Player) (Object) this;
+        boolean isClient = player.level().isClientSide;
+        
         this.slide$handleSlideLogic();
+        this.slide$updateStateMachine(player, isClient);
     }
 
     @Inject(method = "updatePlayerPose", at = @At("HEAD"), cancellable = true)
     private void slide$onUpdatePlayerPose(CallbackInfo ci) {
         Player player = (Player) (Object) this;
         
-        // 骑乘时：结束滑铲状态，设置 STANDING 姿势，然后让原版逻辑继续
         if (this.isPassenger()) {
-            // 如果还在滑铲，强制结束
             if (this.slide$isSliding()) {
                 this.slide$setSliding(false);
                 this.slide$resetSlideState();
             }
-            this.slide$forceCrouchTicks = 0;
-            // 骑乘时设置 STANDING 姿势并刷新碰撞箱
+            this.slide$transitionTo(SlideState.IDLE, 0);
             if (player.getPose() != Pose.STANDING) {
                 player.setPose(Pose.STANDING);
                 player.refreshDimensions();
             }
-            // 不 cancel，让原版逻辑继续处理
             return;
         }
         
-        // 滑铲期间，强制保持 CROUCHING 姿势
         if (this.slide$isSliding()) {
             player.setPose(Pose.CROUCHING);
             ci.cancel();
             return;
         }
         
-        // 在强制潜行期间，阻止 updatePlayerPose 将姿势改为 STANDING
-        if (this.slide$forceCrouchTicks > 0) {
-            if (!this.slide$canStandUp(player)) {
+        switch (this.slide$state) {
+            case ENDING_TO_CROUCH:
                 player.setPose(Pose.CROUCHING);
                 ci.cancel();
-            }
+                return;
+            case ENDING_TO_STAND:
+                player.setPose(Pose.STANDING);
+                ci.cancel();
+                return;
+            default:
+                break;
         }
     }
 
@@ -175,10 +304,8 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
         try {
             boolean sliding = this.slide$isSliding();
             Player player = (Player) (Object) this;
-
             boolean isClient = player.level().isClientSide;
             
-            // TACZ 兼容性：更新 TACZ 的疾跑状态
             if (isClient) {
                 TaczCompat.updateSprintStatus();
             }
@@ -188,34 +315,24 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 return;
             }
 
-            // 强制潜行计时器：在滑铲结束后的几帧内强制保持潜行状态
-            if (this.slide$forceCrouchTicks > 0) {
-                this.slide$forceCrouchTicks--;
-                if (!this.slide$canStandUp(player)) {
-                    player.setPose(Pose.CROUCHING);
-                    player.setShiftKeyDown(true);
-                } else {
-                    this.slide$forceCrouchTicks = 0;
-                }
-            }
-
-            // 滑铲初始化：当 sliding=true 且 sprintSlide=false 时初始化（兼容客户端和服务器端）
+            // 滑铲初始化
             if (sliding && !this.slide$sprintSlide) {
                 this.slide$sprintSlide = true;
                 this.slide$noSlowTicks = 15;
                 this.slide$sprintSlideCooldown = 0;
                 this.slide$airTicks = 0;
+                this.slide$state = SlideState.SLIDING;
 
                 Vec3 slideDirection = this.slide$calculateSlideDirection(player);
                 this.slide$slideDirX = slideDirection.x;
                 this.slide$slideDirZ = slideDirection.z;
 
-                // 只在客户端应用初始冲力，避免重复
                 if (isClient) {
                     Vec3 impulse = new Vec3(this.slide$slideDirX, 0.0D, this.slide$slideDirZ);
                     if (impulse.lengthSqr() > 1.0E-6D) {
                         impulse = impulse.normalize().scale(0.75D);
-                        player.setDeltaMovement(player.getDeltaMovement().add(impulse));
+                        Vec3 currentMovement = player.getDeltaMovement();
+                        player.setDeltaMovement(new Vec3(impulse.x, currentMovement.y, impulse.z));
                     }
                 }
             }
@@ -224,28 +341,56 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 player.setPose(Pose.CROUCHING);
                 player.refreshDimensions();
             }
-            
-            // 滑铲期间强制保持疾跑状态，显示疾跑粒子效果
-            if (sliding && !player.isSprinting()) {
-                player.setSprinting(true);
+
+            // 服务器端滑铲结束检测
+            if (sliding && !isClient) {
+                if (!player.onGround()) {
+                    this.slide$airTicks++;
+                    if (this.slide$airTicks > 10) {
+                        this.slide$setSliding(false);
+                        sliding = false;
+                        this.slide$resetSlideState();
+                    }
+                } else {
+                    this.slide$airTicks = 0;
+                }
+                
+                if (player.horizontalCollision && this.slide$wasSliding) {
+                    this.slide$sprintSlideCooldown = 10;
+                    this.slide$setSliding(false);
+                    sliding = false;
+                    this.slide$resetSlideState();
+                }
+                
+                if (player.isPassenger()) {
+                    this.slide$sprintSlideCooldown = 10;
+                    this.slide$setSliding(false);
+                    sliding = false;
+                    this.slide$transitionTo(SlideState.IDLE, 0);
+                    this.slide$resetSlideState();
+                    player.setPose(Pose.STANDING);
+                    player.refreshDimensions();
+                }
+                
+                if (this.slide$sprintSlide && this.slide$noSlowTicks <= 0) {
+                    Vec3 currentMovement = player.getDeltaMovement();
+                    double currentSpeed = Math.sqrt(currentMovement.x * currentMovement.x + currentMovement.z * currentMovement.z);
+                    if (currentSpeed < 0.05D) {
+                        this.slide$setSliding(false);
+                        sliding = false;
+                        this.slide$resetSlideState();
+                    }
+                }
             }
 
-            // 滑铲结束检测逻辑只在客户端执行，避免客户端和服务器端状态不同步
+            // 客户端滑铲结束检测
             if (sliding && isClient) {
-                // 只有在滑铲已经持续至少一个tick后才允许跳跃打断，避免刚开始滑铲就被打断
-                if (this.jumping && this.slide$wasSliding) {
-                    // 滑铲跳：给玩家额外的向前冲力
-                    Vec3 dm = player.getDeltaMovement();
-                    double forwardBoost = 0.08D;
-                    player.setDeltaMovement(new Vec3(
-                        dm.x + this.slide$slideDirX * forwardBoost,
-                        dm.y,
-                        dm.z + this.slide$slideDirZ * forwardBoost
-                    ));
+                boolean canJumpCancel = this.slide$noSlowTicks <= 5;
+                
+                if (this.jumping && this.slide$wasSliding && canJumpCancel) {
                     this.slide$jumpCancelled = true;
                     this.slide$sprintSlideCooldown = 10;
                     boolean holdingSneak = this.slide$isHoldingSneakKey(player);
-                    this.slide$endSlideWithPoseCheck(player);
                     SlideNetworking.sendSlidePacket(false, holdingSneak);
                     this.slide$setSliding(false);
                     sliding = false;
@@ -254,22 +399,19 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                     double currentSpeed = Math.sqrt(currentMovement.x * currentMovement.x + currentMovement.z * currentMovement.z);
                     
                     if (this.slide$sprintSlide && this.slide$noSlowTicks <= 0) {
-                        double naturalEndThreshold = 0.05D;
-                        if (currentSpeed < naturalEndThreshold) {
+                        boolean shouldEnd = currentSpeed < 0.05D || player.onGround();
+                        if (shouldEnd) {
                             boolean holdingSneak = this.slide$isHoldingSneakKey(player);
-                            this.slide$endSlideWithPoseCheck(player);
                             SlideNetworking.sendSlidePacket(false, holdingSneak);
                             this.slide$setSliding(false);
                             sliding = false;
                         }
                     }
                     
-                    // 空中检测
                     if (!player.onGround()) {
                         this.slide$airTicks++;
                         if (this.slide$airTicks > 10) {
                             boolean holdingSneak = this.slide$isHoldingSneakKey(player);
-                            this.slide$endSlideWithPoseCheck(player);
                             SlideNetworking.sendSlidePacket(false, holdingSneak);
                             this.slide$setSliding(false);
                             sliding = false;
@@ -278,28 +420,20 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                         this.slide$airTicks = 0;
                     }
                     
-                    // 撞墙检测
                     if (player.horizontalCollision && this.slide$wasSliding) {
                         this.slide$sprintSlideCooldown = 10;
                         boolean holdingSneak = this.slide$isHoldingSneakKey(player);
-                        this.slide$endSlideWithPoseCheck(player);
                         SlideNetworking.sendSlidePacket(false, holdingSneak);
                         this.slide$setSliding(false);
                         sliding = false;
                     }
                     
-                    // 骑乘检测
-                    // 注意：骑乘时的滑铲结束由 EntityMixin.startRiding 处理
-                    // 这里只需要结束滑铲状态，不需要调用 endSlideWithPoseCheck
-                    // 因为骑乘时姿势由原版 startRiding 设置为 STANDING
                     if (player.isPassenger()) {
                         this.slide$sprintSlideCooldown = 10;
                         SlideNetworking.sendSlidePacket(false, false);
                         this.slide$setSliding(false);
                         sliding = false;
-                        this.slide$forceCrouchTicks = 0;
-                        // 骑乘时不调用 endSlideWithPoseCheck，避免错误的碰撞检测
-                        // 直接刷新碰撞箱
+                        this.slide$transitionTo(SlideState.IDLE, 0);
                         player.refreshDimensions();
                     }
                 }
@@ -313,6 +447,7 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 this.bob = 0.0F;
             }
 
+            // 滑铲速度维持
             if (sliding && this.slide$sprintSlide && (this.slide$slideDirX != 0.0D || this.slide$slideDirZ != 0.0D)) {
                 if (this.slide$noSlowTicks > 5) {
                     Vec3 dm = player.getDeltaMovement();
@@ -325,25 +460,22 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 }
             }
 
+            // 滑铲结束时的处理
             if (!sliding) {
                 if (this.slide$wasSliding) {
-                    // 跳跃打断时不应用摩擦力，保留滑铲跳冲力
-                    if (!this.slide$jumpCancelled) {
-                        Vec3 dm = player.getDeltaMovement();
-                        double horizontalSpeed = Math.sqrt(dm.x * dm.x + dm.z * dm.z);
-                        if (horizontalSpeed > 0.05D) {
-                            double friction = 0.3D;
-                            player.setDeltaMovement(new Vec3(dm.x * friction, dm.y, dm.z * friction));
-                        } else {
-                            player.setDeltaMovement(new Vec3(0.0D, dm.y, 0.0D));
-                        }
+                    Vec3 dm = player.getDeltaMovement();
+                    double horizontalSpeed = Math.sqrt(dm.x * dm.x + dm.z * dm.z);
+                    if (horizontalSpeed > 0.05D) {
+                        double friction = this.slide$jumpCancelled ? 0.5D : 0.3D;
+                        player.setDeltaMovement(new Vec3(dm.x * friction, dm.y, dm.z * friction));
+                    } else {
+                        player.setDeltaMovement(new Vec3(0.0D, dm.y, 0.0D));
                     }
                     
                     if (this.slide$sprintSlide) {
                         this.slide$sprintSlideCooldown = 10;
                     }
                     
-                    // 姿势设置已在 slide$endSlideWithPoseCheck 中处理
                     this.slide$jumpCancelled = false;
                 }
                 this.slide$sprintSlide = false;
@@ -355,12 +487,12 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
                 this.slide$noSlowTicks--;
             }
 
+            // 速度修改器
             AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
             if (speed != null) {
                 boolean shouldSlow = sliding && this.slide$noSlowTicks == 0;
                 if (shouldSlow) {
                     if (speed.getModifier(SLIDE_SLOWDOWN_ID) == null) {
-                        // 降低减速惩罚，让操作更流畅
                         AttributeModifier slowdown = new AttributeModifier(SLIDE_SLOWDOWN_ID, "slide_slowdown", -0.05D, AttributeModifier.Operation.MULTIPLY_TOTAL);
                         speed.addTransientModifier(slowdown);
                     }
@@ -395,54 +527,37 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
     @Inject(method = "getStandingEyeHeight", at = @At("HEAD"), cancellable = true)
     private void onGetStandingEyeHeight(Pose pose, EntityDimensions dimensions, CallbackInfoReturnable<Float> cir) {
         try {
-            if (this.slide$isSliding()) {
+            boolean sliding = this.slide$isSliding();
+            boolean forceCrouch = this.slide$state == SlideState.ENDING_TO_CROUCH;
+            
+            if (sliding || forceCrouch) {
                 cir.setReturnValue(1.27F);
             }
         } catch (Exception e) {
         }
     }
 
-    /**
-     * 覆盖getDimensions方法，滑铲时返回潜行尺寸
-     * 使用 fixed() 而不是 scalable()，与原版潜行一致
-     */
     @Inject(method = "getDimensions", at = @At("HEAD"), cancellable = true)
     private void onGetDimensions(Pose pose, CallbackInfoReturnable<EntityDimensions> cir) {
         try {
-            // 骑乘时不返回滑铲尺寸，确保碰撞箱正确
-            if (this.slide$isSliding() && !this.isPassenger()) {
-                // 返回潜行尺寸：宽度0.6F，高度1.5F
-                // 使用 fixed() 确保碰撞箱从脚底开始向上
-                cir.setReturnValue(EntityDimensions.fixed(0.6F, 1.5F));
+            boolean sliding = this.slide$isSliding();
+            boolean passenger = this.isPassenger();
+            boolean forceCrouch = this.slide$state == SlideState.ENDING_TO_CROUCH;
+            
+            if (sliding && !passenger) {
+                cir.setReturnValue(EntityDimensions.scalable(0.6F, 1.5F));
+                return;
+            }
+            
+            if (forceCrouch && !passenger) {
+                cir.setReturnValue(EntityDimensions.scalable(0.6F, 1.5F));
             }
         } catch (Exception e) {
-            // 忽略初始化期间的错误
         }
     }
 
-    @Unique
-    private void slide$endSlideWithPoseCheck(Player player) {
-        // 在滑铲结束时立即检测头顶空间并设置正确的姿势
-        boolean canStand = this.slide$canStandUp(player);
-        
-        if (!canStand) {
-            // 空间不足，设置强制潜行计时器（持续5帧确保不会站立）
-            this.slide$forceCrouchTicks = 5;
-            player.setPose(Pose.CROUCHING);
-            player.setShiftKeyDown(true);
-            player.refreshDimensions();
-        } else {
-            // 空间足够，设置为站立
-            this.slide$forceCrouchTicks = 0;
-            player.setPose(Pose.STANDING);
-            player.refreshDimensions();
-        }
-    }
-
-    /**
-     * 检查玩家是否正在按着潜行键
-     * 直接检查 Minecraft 的按键绑定状态，而不是被修改过的 input.shiftKeyDown
-     */
+    // ==================== 辅助方法 ====================
+    
     @Unique
     private boolean slide$isHoldingSneakKey(Player player) {
         if (player.level().isClientSide && player instanceof net.minecraft.client.player.LocalPlayer) {
@@ -454,36 +569,28 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
 
     @Unique
     private boolean slide$canStandUp(Player player) {
-        // 检测玩家头顶是否有足够空间站立（站立高度1.8格，潜行高度1.5格）
         double standingHeight = 1.8D;
         double crouchingHeight = 1.5D;
         
-        // 使用AABB检测头顶空间
         net.minecraft.world.phys.AABB standingBox = player.getBoundingBox().expandTowards(0, standingHeight - crouchingHeight, 0);
         return player.level().noCollision(player, standingBox);
     }
 
     @Unique
     private Vec3 slide$calculateSlideDirection(Player player) {
-        // 优先使用玩家的输入方向（基于视角和按键）
-        // 这样 W+A 会向左前方滑，W+D 会向右前方滑
         float forwardInput = 0.0F;
         float leftInput = 0.0F;
         
-        // 获取玩家输入
         if (player.level().isClientSide && player instanceof net.minecraft.client.player.LocalPlayer localPlayer) {
             forwardInput = localPlayer.input.forwardImpulse;
             leftInput = localPlayer.input.leftImpulse;
         }
         
-        // 如果有输入，基于视角和输入计算方向
         if (forwardInput != 0.0F || leftInput != 0.0F) {
             float yaw = player.getYRot() * ((float)Math.PI / 180F);
             float sinYaw = (float)Math.sin(yaw);
             float cosYaw = (float)Math.cos(yaw);
             
-            // 计算基于视角的移动方向
-            // leftImpulse: 正值=左(A键), 负值=右(D键)
             double dirX = -sinYaw * forwardInput + cosYaw * leftInput;
             double dirZ = cosYaw * forwardInput + sinYaw * leftInput;
             
@@ -493,7 +600,6 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
             }
         }
         
-        // 如果没有输入，使用当前移动方向
         Vec3 currentMovement = player.getDeltaMovement();
         double movementSpeed = Math.sqrt(currentMovement.x * currentMovement.x + currentMovement.z * currentMovement.z);
         
@@ -502,7 +608,6 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
             return movementDir;
         }
         
-        // 最后使用视角方向
         Vec3 lookDirection = player.getLookAngle();
         Vec3 horizLookDir = new Vec3(lookDirection.x, 0.0D, lookDirection.z);
         if (horizLookDir.lengthSqr() > 1.0E-6D) {
@@ -510,38 +615,5 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccessor
         }
         
         return Vec3.ZERO;
-    }
-    
-    /**
-     * 检查玩家是否在任何流体中（水、岩浆、其他 mod 的流体）
-     * 使用 Minecraft 原版的流体检测方法，兼容所有 mod 的流体
-     * 
-     * @param player 要检查的玩家
-     * @return 如果玩家在任何流体中返回 true
-     */
-    @Unique
-    private boolean slide$isInAnyFluid(Player player) {
-        // 检查是否在水中（包括气泡柱）
-        if (player.isInWater()) {
-            return true;
-        }
-        
-        // 检查是否在岩浆中
-        if (player.isInLava()) {
-            return true;
-        }
-        
-        // 检查是否在游泳状态（可能在其他 mod 的流体中）
-        if (player.isSwimming()) {
-            return true;
-        }
-        
-        // 检查玩家脚下的方块是否是流体
-        // 这可以检测到其他 mod 添加的流体
-        if (!player.level().getFluidState(player.blockPosition()).isEmpty()) {
-            return true;
-        }
-        
-        return false;
     }
 }
