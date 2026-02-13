@@ -2,7 +2,8 @@
   "slide": {
     "sounds": [
       {
-        "name": "slide:slide"
+        "name": "slide:slide",
+        "attenuation_distance": 16
       }
     ]
   }

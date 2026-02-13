@@ -9,4 +9,8 @@ public interface PlayerAccessor {
     boolean slide$isForceCrouching(); // 检查是否处于强制潜行状态（滑铲结束后）
     boolean slide$canJumpCancel(); // 检查是否可以跳跃打断滑铲（滑铲后期）
     void slide$setSafetyCheckDelay(int ticks); // 设置安全检查延迟（用于服务器端同步）
+    
+    // 客户端同步的潜行键状态（解决服务器端ShiftKey延迟问题）
+    boolean slide$getClientHoldingSneak();
+    void slide$setClientHoldingSneak(boolean holding);
 }
